@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Personal Bladder Efficiency Tracker</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.7.0/chart.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-annotation/1.0.2/chartjs-plugin-annotation.min.js"></script>
+</head>
+<body class="bg-gray-50 p-6">
+    <div class="max-w-4xl mx-auto bg-white p-6 rounded-lg shadow">
+        <h1 class="text-2xl font-bold mb-6">Personal Bladder Efficiency Tracker</h1>
+        
+        <!-- Calculator inputs -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            <!-- Storage Phase Inputs -->
+            <div class="space-y-4">
+                <h2 class="text-lg font-semibold">Storage Phase Inputs</h2>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Voided Volume (mL)</label>
+                    <input type="number" id="voidVolume" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border" placeholder="e.g., 350">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Fill Time (minutes)</label>
+                    <input type="number" id="fillTime" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border" placeholder="e.g., 180">
+                </div>
+            </div>
+
+            <!-- Voiding Phase Inputs -->
+            <div class="space-y-4">
+                <h2 class="text-lg font-semibold">Voiding Phase Inputs</h2>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Void Time (seconds)</label>
+                    <input type="number" id="voidTime" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border" placeholder="e.g., 25">
+                </div>
+            </div>
+        </div>
+
+        <!-- Advanced Parameters -->
+        <div class="mb-6">
+            <button onclick="toggleAdvanced()" class="text-blue-600 hover:text-blue-800 text-sm">
+                Toggle Advanced Parameters
+            </button>
+            <div id="advancedParams" class="hidden mt-4 p-4 bg-gray-50 rounded grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Min Functional Volume (mL)</label>
+                    <input type="number" id="voidMin" value="50" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Max Functional Volume (mL)</label>
+                    <input type="number" id="voidMax" value="500" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Reference Void Time (proportional to volume, base: 30 sec for 500mL)</label>
+                    <input type="number" id="voidTimeNorm" value="30" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border">
+                </div>
+            </div>
+        </div>
+
+        <!-- Data Management Controls -->
+        <div class="flex flex-wrap gap-4 mb-6">
+            <button onclick="calculate()" class="bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 transition-colors">
+                Calculate & Save
+            </button>
+            <button onclick="exportData()" class="bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 transition-colors">
+                Download History
+            </button>
+            <input type="file" id="importFile" accept=".json" class="hidden" onchange="importData(event)">
+            <button onclick="document.getElementById('importFile').click()" class="bg-yellow-600 text-white py-2 px-4 rounded-md hover:bg-yellow-700 transition-colors">
+                Upload History
+            </button>
+            <button onclick="clearData()" class="bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700 transition-colors">
+                Clear History
+            </button>
+        </div>
+
+        <!-- Results Display -->
+        <div id="results" class="hidden">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                <!-- Storage Phase Results -->
+                <div class="p-4 bg-gray-50 rounded">
+                    <h3 class="font-semibold mb-2">Storage Phase Results</h3>
+                    <div class="space-y-2">
+                        <p>Fill Rate: <span id="fillRate">-</span> mL/min</p>
+                        <p>Storage Efficiency: <span id="storageEfficiency">-</span></p>
+                        <p class="text-sm text-gray-600" id="storageInterpretation"></p>
+                    </div>
+                </div>
+
+                <!-- Voiding Phase Results -->
+                <div class="p-4 bg-gray-50 rounded">
+                    <h3 class="font-semibold mb-2">Voiding Phase Results</h3>
+                    <div class="space-y-2">
+                        <p>Voiding Efficiency: <span id="voidingEfficiency">-</span></p>
+                        <p class="text-sm text-gray-600" id="voidingInterpretation"></p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Progress Chart -->
+            <div class="mt-6 p-4 bg-gray-50 rounded">
+                <h3 class="font-semibold mb-4">Your Progress Over Time</h3>
+                <canvas id="lineChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let lineChart = null;
+        let historicalData = {
+            storage: [],
+            voiding: [],
+            timestamps: []
+        };
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadSavedData();
+        });
+
+        function loadSavedData() {
+            const savedData = localStorage.getItem('bladderEfficiencyData');
+            if (savedData) {
+                historicalData = JSON.parse(savedData);
+                if (historicalData.storage.length > 0) {
+                    document.getElementById('results').classList.remove('hidden');
+                    updateLineChart();
+                }
+            }
+        }
+
+        function toggleAdvanced() {
+            document.getElementById('advancedParams').classList.toggle('hidden');
+        }
+
+        function calculate() {
+            const voidVolume = parseFloat(document.getElementById('voidVolume').value) || 0;
+            const fillTime = parseFloat(document.getElementById('fillTime').value) || 0;
+            const voidTime = parseFloat(document.getElementById('voidTime').value) || 0;
+            const voidMin = parseFloat(document.getElementById('voidMin').value) || 50;
+            const voidMax = parseFloat(document.getElementById('voidMax').value) || 500;
+            const voidTimeNorm = parseFloat(document.getElementById('voidTimeNorm').value) || 30;
+
+            if (!voidVolume || !fillTime || !voidTime) {
+                alert('Please fill in all required fields');
+                return;
+            }
+
+            const fillRate = voidVolume / fillTime;
+            
+            // Calculate efficiencies
+            const MA_storage = voidVolume / (fillTime * fillRate);
+            const DA_storage = (voidVolume - voidMin) / (voidMax - voidMin);
+            const storage_efficiency = MA_storage * DA_storage;
+
+            const MA_voiding = Math.sqrt(voidVolume) / voidTime;
+            const DA_voiding = (voidVolume * voidTimeNorm) / (voidMax * voidTime);
+            const voiding_efficiency = MA_voiding * DA_voiding;
+
+            // Update results
+            document.getElementById('fillRate').textContent = fillRate.toFixed(2);
+            document.getElementById('storageEfficiency').textContent = (storage_efficiency * 100).toFixed(1) + '%';
+            document.getElementById('voidingEfficiency').textContent = (voiding_efficiency * 100).toFixed(1) + '%';
+            document.getElementById('storageInterpretation').textContent = interpretEfficiency(storage_efficiency, 'storage');
+            document.getElementById('voidingInterpretation').textContent = interpretEfficiency(voiding_efficiency, 'voiding');
+
+            // Save new data point
+            const timestamp = new Date().toLocaleString();
+            historicalData.timestamps.push(timestamp);
+            historicalData.storage.push(storage_efficiency);
+            historicalData.voiding.push(voiding_efficiency);
+
+            // Save to localStorage
+            localStorage.setItem('bladderEfficiencyData', JSON.stringify(historicalData));
+
+            // Show results and update chart
+            document.getElementById('results').classList.remove('hidden');
+            updateLineChart();
+        }
+
+        function interpretEfficiency(efficiency, type) {
+            if (efficiency >= 0.7) return `Normal ${type} efficiency`;
+            if (efficiency >= 0.5) return `Mild decrease in ${type} efficiency`;
+            if (efficiency >= 0.3) return `Moderate decrease in ${type} efficiency`;
+            return `Severe decrease in ${type} efficiency`;
+        }
+
+        function updateLineChart() {
+            if (lineChart) {
+                lineChart.destroy();
+            }
+
+            const ctx = document.getElementById('lineChart').getContext('2d');
+            lineChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: historicalData.timestamps,
+                    datasets: [
+                        {
+                            label: 'Storage Efficiency',
+                            data: historicalData.storage.map(v => v * 100),
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Voiding Efficiency',
+                            data: historicalData.voiding.map(v => v * 100),
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                            tension: 0.4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 100,
+                            title: {
+                                display: true,
+                                text: 'Efficiency (%)'
+                            }
+                        }
+                    },
+                    plugins: {
+                        annotation: {
+                            annotations: [
+                                {
+                                    type: 'box',
+                                    yMin: 70,
+                                    yMax: 100,
+                                    backgroundColor: 'rgba(0, 255, 0, 0.1)',
+                                    borderWidth: 0
+                                },
+                                {
+                                    type: 'box',
+                                    yMin: 50,
+                                    yMax: 70,
+                                    backgroundColor: 'rgba(255, 165, 0, 0.1)',
+                                    borderWidth: 0
+                                },
+                                {
+                                    type: 'box',
+                                    yMin: 30,
+                                    yMax: 50,
+                                    backgroundColor: 'rgba(255, 0, 0, 0.1)',
+                                    borderWidth: 0
+                                },
+                                {
+                                    type: 'box',
+                                    yMin: 0,
+                                    yMax: 30,
+                                    backgroundColor: 'rgba(139, 0, 0, 0.1)',
+                                    borderWidth: 0
+                                }
+                            ]
+                        }
+                    }
+                }
+            });
+        }
+
+        function exportData() {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(historicalData));
+            const downloadLink = document.createElement('a');
+            downloadLink.setAttribute("href", dataStr);
+            downloadLink.setAttribute("download", "bladder_efficiency_history.json");
+            document.body.appendChild(downloadLink);
+            downloadLink.click();
+            downloadLink.remove();
+        }
+
+        function importData(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    try {
+                        historicalData = JSON.parse(e.target.result);
+                        localStorage.setItem('bladderEfficiencyData', JSON.stringify(historicalData));
+                        document.getElementById('results').classList.remove('hidden');
+                        updateLineChart();
+                        alert('History imported successfully!');
+                    } catch (error) {
+                        alert('Error importing data. Please check the file format.');
+                    }
+                };
+                reader.readAsText(file);
+            }
+        }
+
+        function clearData() {
+            if (confirm('Are you sure you want to clear all your history? This cannot be undone.')) {
+                localStorage.removeItem('bladderEfficiencyData');
+                historicalData = {
+                    storage: [],
+                    voiding: [],
+                    timestamps: []
+                };
+                document.getElementById('results').classList.add('hidden');
+                updateLineChart();
+                alert('History cleared successfully!');
+            }
+        }
+    </script>
+</body>
+</html>
